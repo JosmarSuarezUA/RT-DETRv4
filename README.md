@@ -20,6 +20,10 @@
     </a>
 </p>
 
+<p align="center">
+  <strong>🎉 We are excited to announce that RT-DETRv4 has been accepted to ECCV 2026!</strong>
+</p>
+
 ---
 
 This is the official implementation of the paper:
@@ -57,6 +61,7 @@ RT-DETRv4 achieves new state-of-the-art results on the COCO dataset, outperformi
 | RT-DETRv4-X | 57.0 | 74.6 | 62.1 | 12.90 ms | 78 | [yml](./configs/rtv4/rtv4_hgnetv2_x_coco.yml) | [log](./logs/RTv4-X-hgnet.log) | [ckpt](https://drive.google.com/file/d/19gnkMTgFveJsrOvSmEPQXCTG6v9oQHN3) |
 ## 📣 News
 
+  * **[2026.06.18]** 🎉 RT-DETRv4 has been accepted to **ECCV 2026**! We sincerely thank all contributors and the community for your support!
   * **[2025.11.17]** Code, configs and checkpoints fully released! Thanks for your attention, and feel free to ask any questions!
   * **[2025.10.30]** Repo created, and code will be open-sourced very soon!
 
