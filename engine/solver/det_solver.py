@@ -19,6 +19,19 @@ from ._solver import BaseSolver
 from .det_engine import train_one_epoch, evaluate
 from ..optim.lr_scheduler import FlatCosineLRScheduler
 
+COCOEVAL_MAP = ['mAP_50_95',
+    'mAP_50',
+    'mAP_75',
+    'mAP_small',
+    'mAP_medium',
+    'mAP_large',
+    'AR_1',
+    'AR_10',
+    'AR_100',
+    'AR_small',
+    'AR_medium',
+    'AR_large']
+
 
 class DetSolver(BaseSolver):
 
@@ -162,7 +175,8 @@ class DetSolver(BaseSolver):
             for k in test_stats:
                 if self.writer and dist_utils.is_main_process():
                     for i, v in enumerate(test_stats[k]):
-                        self.writer.add_scalar(f'Test/{k}_{i}'.format(k), v, epoch)
+                        label = COCOEVAL_MAP[i] if i < len(COCOEVAL_MAP) else f'unknown_{i}'
+                        self.writer.add_scalar(f'Test/{k}_{label}'.format(k, label), v, epoch)
 
                 if k in best_stat:
                     best_stat['epoch'] = epoch if test_stats[k][0] > best_stat[k] else best_stat['epoch']
