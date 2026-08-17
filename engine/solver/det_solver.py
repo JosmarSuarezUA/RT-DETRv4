@@ -13,6 +13,11 @@ import math
 
 import torch
 
+try:
+    import wandb
+except Exception:
+    wandb = None
+
 from ..misc import dist_utils, stats
 
 from ._solver import BaseSolver
@@ -36,6 +41,12 @@ COCOEVAL_MAP = ['mAP_50_95',
 class DetSolver(BaseSolver):
 
     def fit(self, ):
+        if dist_utils.is_main_process() and wandb is not None:
+            wandb.init(
+                project='rtdetrv4',
+                tags=['train'],
+                config=self.cfg,
+            )
         self.train()
         args = self.cfg
 
@@ -220,6 +231,18 @@ class DetSolver(BaseSolver):
                 'n_parameters': n_parameters
             }
 
+            if wandb is not None and wandb.run is not None and dist_utils.is_main_process():
+                
+                wandb_stats = {}
+                # Add test stats
+                for k in test_stats:
+                    for i, v in enumerate(test_stats[k]):
+                        label = COCOEVAL_MAP[i] if i < len(COCOEVAL_MAP) else f'unknown_{i}'
+                        wandb_stats[f'Test/{k}_{label}'] = v
+                # Add train stats
+                wandb_stats.update({f'Train/{k}': v for k, v in log_stats.items() if not any(token in str(k).lower() for token in ("aux", "dn", "enc", "pre"))}) 
+                wandb.log(wandb_stats, step=epoch)
+
             if self.output_dir and dist_utils.is_main_process():
                 with (self.output_dir / "log.txt").open("a") as f:
                     f.write(json.dumps(log_stats) + "\n")
@@ -238,6 +261,8 @@ class DetSolver(BaseSolver):
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Training time {}'.format(total_time_str))
+        if dist_utils.is_main_process() and wandb is not None:
+            wandb.finish()
 
 
     def val(self, ):
