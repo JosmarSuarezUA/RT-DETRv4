@@ -69,13 +69,14 @@ class DetSolver(BaseSolver):
         # evaluate again before resume training
         if self.last_epoch > 0:
             module = self.ema.module if self.ema else self.model
-            test_stats, coco_evaluator = evaluate(
+            test_stats, coco_evaluator, val_loss_stats = evaluate(
                 module,
                 self.criterion,
                 self.postprocessor,
                 self.val_dataloader,
                 self.evaluator,
-                self.device
+                self.device,
+                compute_val_loss=True
             )
             for k in test_stats:
                 best_stat['epoch'] = self.last_epoch
@@ -173,13 +174,14 @@ class DetSolver(BaseSolver):
                     dist_utils.save_on_master(self.state_dict(), checkpoint_path)
 
             module = self.ema.module if self.ema else self.model
-            test_stats, coco_evaluator = evaluate(
+            test_stats, coco_evaluator, val_loss_stats = evaluate(
                 module,
                 self.criterion,
                 self.postprocessor,
                 self.val_dataloader,
                 self.evaluator,
-                self.device
+                self.device,
+                compute_val_loss=True
             )
 
             # TODO
@@ -232,15 +234,20 @@ class DetSolver(BaseSolver):
             }
 
             if wandb is not None and wandb.run is not None and dist_utils.is_main_process():
-                
                 wandb_stats = {}
-                # Add test stats
+                # COCO AP
                 for k in test_stats:
                     for i, v in enumerate(test_stats[k]):
                         label = COCOEVAL_MAP[i] if i < len(COCOEVAL_MAP) else f'unknown_{i}'
                         wandb_stats[f'Test/{k}_{label}'] = v
-                # Add train stats
-                wandb_stats.update({f'Train/{k}': v for k, v in log_stats.items() if not any(token in str(k).lower() for token in ("aux", "dn", "enc", "pre"))}) 
+                # Non-auxiliary validation losses
+                wandb_stats.update({
+                    f'Val/{k}': v for k, v in val_loss_stats.items()
+                    if not any(token in k.lower() for token in ("aux", "dn", "enc", "pre"))
+                })
+                # Train stats
+                wandb_stats.update({f'Train/{k}': v for k, v in log_stats.items()
+                                    if not any(token in str(k).lower() for token in ("aux", "dn", "enc", "pre"))})
                 wandb.log(wandb_stats, step=epoch)
 
             if self.output_dir and dist_utils.is_main_process():
@@ -269,7 +276,7 @@ class DetSolver(BaseSolver):
         self.eval()
 
         module = self.ema.module if self.ema else self.model
-        test_stats, coco_evaluator = evaluate(module, self.criterion, self.postprocessor,
+        test_stats, coco_evaluator, val_loss_stats = evaluate(module, self.criterion, self.postprocessor,
                 self.val_dataloader, self.evaluator, self.device)
 
         if self.output_dir:

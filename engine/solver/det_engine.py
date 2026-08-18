@@ -163,40 +163,52 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
 
 
 @torch.no_grad()
-def evaluate(model: torch.nn.Module, criterion: torch.nn.Module, postprocessor, data_loader, coco_evaluator: CocoEvaluator, device):
+def evaluate(model, criterion, postprocessor, data_loader, coco_evaluator, device,
+             writer=None, epoch=None, use_amp=False, compute_val_loss=True):
     model.eval()
     criterion.eval()
     coco_evaluator.cleanup()
 
     metric_logger = MetricLogger(delimiter="  ")
-    # metric_logger.add_meter('class_error', SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Test:'
-
-    # iou_types = tuple(k for k in ('segm', 'bbox') if k in postprocessor.keys())
     iou_types = coco_evaluator.iou_types
-    # coco_evaluator = CocoEvaluator(base_ds, iou_types)
-    # coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
 
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
+        if compute_val_loss:
+            bn_buffer_snapshot = {
+                name: buf.detach().clone()
+                for name, buf in model.named_buffers()
+                if name.endswith(('running_mean', 'running_var', 'num_batches_tracked'))
+            }
+            model.train()
+            try:
+                with torch.autocast(device_type=str(device), enabled=use_amp):
+                    train_shape_outputs = model(samples, targets=targets)
+                with torch.autocast(device_type=str(device), enabled=False):
+                    loss_dict = criterion(train_shape_outputs, targets)
+                loss_dict_reduced = dist_utils.reduce_dict(loss_dict)
+                metric_logger.update(**loss_dict_reduced, loss=sum(loss_dict_reduced.values()))
+                del train_shape_outputs, loss_dict
+            finally:
+                model.eval()
+                with torch.no_grad():
+                    for name, buf in model.named_buffers():
+                        if name in bn_buffer_snapshot:
+                            buf.copy_(bn_buffer_snapshot[name])
+
+        # unchanged: inference-mode forward for COCO AP
         outputs = model(samples)
-
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
-
         results = postprocessor(outputs, orig_target_sizes)
-
-        # if 'segm' in postprocessor.keys():
-        #     target_sizes = torch.stack([t["size"] for t in targets], dim=0)
-        #     results = postprocessor['segm'](results, outputs, orig_target_sizes, target_sizes)
-
-        res = {target['image_id'].item(): output for target, output in zip(targets, results)}
+        res = {t['image_id'].item(): o for t, o in zip(targets, results)}
         if coco_evaluator is not None:
             coco_evaluator.update(res)
 
-    # gather the stats from all processes
     metric_logger.synchronize_between_processes()
+    
     print("Averaged stats:", metric_logger)
     if coco_evaluator is not None:
         coco_evaluator.synchronize_between_processes()
@@ -206,12 +218,18 @@ def evaluate(model: torch.nn.Module, criterion: torch.nn.Module, postprocessor, 
         coco_evaluator.accumulate()
         coco_evaluator.summarize()
 
+    val_loss_stats = {k: meter.global_avg for k, meter in metric_logger.meters.items() if k != 'lr'}
+    if writer and dist_utils.is_main_process() and epoch is not None:
+        for k, v in val_loss_stats.items():
+            writer.add_scalar(f'Val/loss_{k}', v, epoch)
+
     stats = {}
-    # stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    if compute_val_loss:
+        print("Validation loss stats:", metric_logger)
     if coco_evaluator is not None:
+        coco_evaluator.accumulate()
+        coco_evaluator.summarize()
         if 'bbox' in iou_types:
             stats['coco_eval_bbox'] = coco_evaluator.coco_eval['bbox'].stats.tolist()
-        if 'segm' in iou_types:
-            stats['coco_eval_masks'] = coco_evaluator.coco_eval['segm'].stats.tolist()
 
-    return stats, coco_evaluator
+    return stats, coco_evaluator, val_loss_stats
