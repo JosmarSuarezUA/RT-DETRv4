@@ -209,3 +209,6 @@ __marimo__/
 
 **/.venv/
 outputs/
+wandb/
+
+*.pth
