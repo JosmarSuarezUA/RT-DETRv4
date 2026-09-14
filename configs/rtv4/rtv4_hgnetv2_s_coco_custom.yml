@@ -1,6 +1,7 @@
 __include__: [
   '../dfine/dfine_hgnetv2_s_coco.yml',
-  '../base/rtv4.yml'
+  '../base/rtv4.yml',
+  # '../dataset/sds_jp_coco.yml'
 ]
 
 output_dir: ./outputs/rtv4_hgnetv2_s_coco
