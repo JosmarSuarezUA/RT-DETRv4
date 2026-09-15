@@ -213,4 +213,5 @@ wandb/
 
 *.pth
 
-eval_output
+eval_output/
+logs/
