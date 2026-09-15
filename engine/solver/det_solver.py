@@ -189,7 +189,7 @@ class DetSolver(BaseSolver):
                 if self.writer and dist_utils.is_main_process():
                     for i, v in enumerate(test_stats[k]):
                         label = COCOEVAL_MAP[i] if i < len(COCOEVAL_MAP) else f'unknown_{i}'
-                        self.writer.add_scalar(f'Test/{k}_{label}'.format(k, label), v, epoch)
+                        self.writer.add_scalar(f'Metrics/{k}_{label}'.format(k, label), v, epoch)
 
                 if k in best_stat:
                     best_stat['epoch'] = epoch if test_stats[k][0] > best_stat[k] else best_stat['epoch']
@@ -239,7 +239,7 @@ class DetSolver(BaseSolver):
                 for k in test_stats:
                     for i, v in enumerate(test_stats[k]):
                         label = COCOEVAL_MAP[i] if i < len(COCOEVAL_MAP) else f'unknown_{i}'
-                        wandb_stats[f'Test/{k}_{label}'] = v
+                        wandb_stats[f'Metrics/{k}_{label}'] = v
                 # Non-auxiliary validation losses
                 wandb_stats.update({
                     f'Val/{k}': v for k, v in val_loss_stats.items()
