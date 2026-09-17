@@ -49,6 +49,7 @@ from tools.metrics_common import (
     log_target_scalars,
     plot_labeled_tsne,
     save_results_csv,
+    calculate_conf_curves,
 )
 
 
@@ -434,7 +435,7 @@ def evaluate_detection_metrics(
     repo_root: str = ".",
     verbose: bool = True,
 ) -> tuple[dict[str, Any], list[dict], Path | None]:
-    """Run inference and calculate complete detection metrics + curves.
+    """Run inference and calculate detection metrics at a fixed threshold.
 
     Returns
     -------
@@ -486,6 +487,7 @@ def run_full_evaluation(
     extract_embeddings_flag: bool = True,
     embedding_module: str = "encoder",
     conf_threshold: float = 0.50,
+    fixed_conf_threshold: float | None = None,
     verbose: bool = True,
 ) -> tuple[dict, np.ndarray | None, list[str], Path | None]:
     """Runs prediction, metric evaluation, confidence estimation, and embedding extraction.
@@ -495,10 +497,18 @@ def run_full_evaluation(
     tuple[dict, np.ndarray | None, list[str], Path | None]
         (result_dict, embeddings, file_names, plots_dir)
     """
-    img_folder = dataset_cfg["img_folder"]
-    ann_file = dataset_cfg["ann_file"]
+    splits = dataset_cfg.get("splits")
+    if not isinstance(splits, dict) or "test" not in splits:
+        raise ValueError("dataset_cfg must define a 'splits' dictionary with a 'test' split")
+
+    test_split = splits["test"]
+    if not isinstance(test_split, dict) or "img_folder" not in test_split or "ann_file" not in test_split:
+        raise ValueError("dataset_cfg['splits']['test'] must define 'img_folder' and 'ann_file'")
+
+    img_folder = test_split["img_folder"]
+    ann_file = test_split["ann_file"]
     iou_match = float(dataset_cfg.get("iou", 0.50))
-    conf = float(dataset_cfg.get("conf", conf_threshold))
+    conf = float(dataset_cfg.get("conf", conf_threshold)) if fixed_conf_threshold is None else fixed_conf_threshold
     min_score = float(dataset_cfg.get("min_score", 0.001))
     remap_mscoco = bool(dataset_cfg.get("remap_mscoco", False))
     batch_size = int(dataset_cfg.get("batch_size", 8))
@@ -598,6 +608,38 @@ def evaluate_source_against_targets(
     results: list[dict] = []
     embeddings_by_dataset: dict[str, np.ndarray] = {}
 
+    source_cfg = dataset_configs[source_name]
+    source_splits = source_cfg.get("splits", {})
+    source_val_split = source_splits.get("val") if isinstance(source_splits, dict) else None
+    if not isinstance(source_val_split, dict) or "img_folder" not in source_val_split or "ann_file" not in source_val_split:
+        raise ValueError("The source dataset must define splits['val'] with 'img_folder' and 'ann_file'")
+
+    if verbose:
+        print(f"[*] Calculating confidence curves on source validation split: {source_name}")
+    source_val_predictions, source_val_gt, _ = rtdetr_predict(
+        config_path=config_path,
+        checkpoint_path=checkpoint_path,
+        img_folder=source_val_split["img_folder"],
+        ann_file=source_val_split["ann_file"],
+        batch_size=source_cfg.get("batch_size", 8),
+        num_workers=source_cfg.get("num_workers", 4),
+        device=device,
+        min_score=source_cfg.get("min_score", 0.001),
+        remap_mscoco=source_cfg.get("remap_mscoco", False),
+        repo_root=repo_root,
+        verbose=verbose,
+    )
+    source_val_curve_dir = result_folder / source_name / "val"
+    source_val_curves = calculate_conf_curves(
+        pred_list=source_val_predictions,
+        coco_gt=source_val_gt,
+        iou_match=source_cfg.get("iou", 0.50),
+        output_dir=source_val_curve_dir,
+    )
+    source_conf_threshold = source_val_curves["best_f2_conf"]
+    if verbose:
+        print(f"[*] Source validation best_f2_conf: {source_conf_threshold:.4f}")
+
     # Evaluate each target split
     for target_name in target_names:
         cfg_t = dataset_configs[target_name]
@@ -616,6 +658,7 @@ def evaluate_source_against_targets(
             output_dir=target_out_dir,
             extract_embeddings_flag=extract_embeddings_flag,
             embedding_module=embedding_module,
+            fixed_conf_threshold=source_conf_threshold,
             verbose=verbose,
         )
 
@@ -637,20 +680,23 @@ def evaluate_source_against_targets(
 
     # Optional: Extract source training embeddings for complete domain visualization
     src_cfg = dataset_configs.get(source_name, {})
+    src_splits = src_cfg.get("splits", {})
+    src_train_split = src_splits.get("train") if isinstance(src_splits, dict) else None
     if (
         extract_embeddings_flag
-        and "train_img_folder" in src_cfg
-        and "train_ann_file" in src_cfg
-        and os.path.exists(src_cfg["train_img_folder"])
-        and os.path.exists(src_cfg["train_ann_file"])
+        and isinstance(src_train_split, dict)
+        and "img_folder" in src_train_split
+        and "ann_file" in src_train_split
+        and os.path.exists(src_train_split["img_folder"])
+        and os.path.exists(src_train_split["ann_file"])
     ):
         if verbose:
             print(f"[*] Extracting embeddings for source train split: {source_name}")
         src_train_emb, _, _ = calculate_embeddings(
             config_path=config_path,
             checkpoint_path=checkpoint_path,
-            img_folder=src_cfg["train_img_folder"],
-            ann_file=src_cfg["train_ann_file"],
+            img_folder=src_train_split["img_folder"],
+            ann_file=src_train_split["ann_file"],
             batch_size=src_cfg.get("batch_size", 8),
             num_workers=src_cfg.get("num_workers", 4),
             device=device,
@@ -828,8 +874,12 @@ def _main_cli():
         args.source_name: {
             "label": args.dataset_label,
             "config": args.config,
-            "ann_file": args.ann_file,
-            "img_folder": args.img_folder,
+            "splits": {
+                "test": {
+                    "ann_file": args.ann_file,
+                    "img_folder": args.img_folder,
+                },
+            },
             "iou": args.iou_match,
             "conf": args.conf_threshold,
             "min_score": args.min_score,

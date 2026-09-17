@@ -73,17 +73,31 @@ if __name__ == "__main__":
         "A": {
             "label":      "SeaDronesSee",
             "config":     "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
-            "ann_file":   "/data2/detection_datasets/processed/sds_jp_coco/instances_test.json",
-            "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/test",
-            "train_ann_file":   "/data2/detection_datasets/processed/sds_jp_coco/instances_test.json",
-            "train_img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/training",
+            "splits":{
+                "train":{
+                    "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_train.json",
+                    "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/training"
+                },
+                "val":{
+                    "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_val.json",
+                    "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/validation"
+                },
+                "test":{
+                    "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_test.json",
+                    "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/test"
+                }
+            },
             "iou": 0.20, "conf": 0.001,
         },
         "B": {
             "label":      "SynBase",
             "config":     "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
-            "ann_file":   "/data2/detection_datasets/processed/synbase_coco/instances_test.json",
-            "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/test",
+            "splits": {
+                "test": {
+                    "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_test.json",
+                    "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/test"
+                }
+            },
             "iou": 0.20, "conf": 0.001,
         },
     }

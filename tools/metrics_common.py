@@ -115,6 +115,107 @@ def _match_at_confidence(
 # 1. Detection Metrics & Curves
 # ---------------------------------------------------------------------------
 
+def calculate_conf_curves(
+    pred_list: list[dict],
+    coco_gt: Any,
+    iou_match: float = 0.50,
+    output_dir: str | Path | None = None,
+    num_conf_steps: int = 100,
+) -> dict[str, Any]:
+    """Calculate confidence-threshold curves and select the best F2 threshold."""
+    from pycocotools.coco import COCO
+
+    if isinstance(coco_gt, (str, Path)):
+        coco_gt = COCO(str(coco_gt))
+
+    gt_by_img = defaultdict(lambda: defaultdict(list))
+    total_gt = 0
+    for ann in coco_gt.dataset.get("annotations", []):
+        if ann.get("iscrowd", 0) == 1:
+            continue
+        x, y, w, h = ann["bbox"]
+        gt_by_img[ann["image_id"]][ann["category_id"]].append([x, y, x + w, y + h])
+        total_gt += 1
+
+    pred_by_img = defaultdict(lambda: defaultdict(list))
+    for prediction in pred_list:
+        pred_by_img[prediction["image_id"]][prediction["category_id"]].append(prediction)
+
+    conf_thresholds = np.linspace(0.01, 0.99, num_conf_steps)
+    precision_list = []
+    recall_list = []
+    f1_list = []
+    f2_list = []
+    for conf in conf_thresholds:
+        _, _, _, _, precision, recall, f1, f2 = _match_at_confidence(
+            gt_by_img=gt_by_img,
+            pred_by_img=pred_by_img,
+            conf_thresh=conf,
+            iou_thresh=iou_match,
+            total_gt=total_gt,
+        )
+        precision_list.append(precision)
+        recall_list.append(recall)
+        f1_list.append(f1)
+        f2_list.append(f2)
+
+    precision_array = np.array(precision_list)
+    recall_array = np.array(recall_list)
+    f1_array = np.array(f1_list)
+    f2_array = np.array(f2_list)
+    best_f1_idx = int(np.argmax(f1_array)) if len(f1_array) > 0 else 0
+    best_f2_idx = int(np.argmax(f2_array)) if len(f2_array) > 0 else 0
+
+    curves = {
+        "confidence": conf_thresholds.tolist(),
+        "precision": precision_array.tolist(),
+        "recall": recall_array.tolist(),
+        "f1": f1_array.tolist(),
+        "f2": f2_array.tolist(),
+    }
+    result = {
+        "best_f1_conf": float(conf_thresholds[best_f1_idx]),
+        "best_f1": float(f1_array[best_f1_idx]),
+        "best_f1_precision": float(precision_array[best_f1_idx]),
+        "best_f1_recall": float(recall_array[best_f1_idx]),
+        "best_f2_conf": float(conf_thresholds[best_f2_idx]),
+        "best_f2": float(f2_array[best_f2_idx]),
+        "best_f2_precision": float(precision_array[best_f2_idx]),
+        "best_f2_recall": float(recall_array[best_f2_idx]),
+        "curve_data": curves,
+    }
+
+    if output_dir is not None:
+        out_path = Path(output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        with open(out_path / "metrics_curves.csv", "w", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["confidence_threshold", "precision", "recall", "f1", "f2"])
+            for values in zip(conf_thresholds, precision_array, recall_array, f1_array, f2_array):
+                writer.writerow([round(value, 4) for value in values])
+
+        def _plot(x, y, xlabel, ylabel, title, filename):
+            plt.figure(figsize=(7, 5))
+            plt.plot(x, y, color="#1f77b4", linewidth=2.0)
+            plt.xlabel(xlabel, fontsize=12)
+            plt.ylabel(ylabel, fontsize=12)
+            plt.title(title, fontsize=13)
+            plt.grid(True, linestyle="--", alpha=0.5)
+            plt.xlim([0.0, 1.0])
+            plt.ylim([0.0, 1.05])
+            plt.tight_layout()
+            plt.savefig(out_path / filename, dpi=180)
+            plt.close()
+
+        _plot(conf_thresholds, precision_array, "Confidence Threshold", "Precision", "Precision vs. Confidence", "precision_curve.png")
+        _plot(conf_thresholds, recall_array, "Confidence Threshold", "Recall", "Recall vs. Confidence", "recall_curve.png")
+        _plot(conf_thresholds, f1_array, "Confidence Threshold", "F1 Score", "F1 Score vs. Confidence", "f1_curve.png")
+        _plot(conf_thresholds, f2_array, "Confidence Threshold", "F2 Score", "F2 Score vs. Confidence", "f2_curve.png")
+        _plot(recall_array, precision_array, "Recall", "Precision", f"Precision-Recall Curve (IoU={iou_match})", "pr_curve.png")
+
+    return result
+
+
 def calculate_metrics(
     pred_list: list[dict],
     coco_gt: Any,
@@ -122,9 +223,8 @@ def calculate_metrics(
     iou_match: float = 0.50,
     conf_threshold: float = 0.50,
     output_dir: str | Path | None = None,
-    num_conf_steps: int = 100,
 ) -> dict[str, Any]:
-    """Compute detection metrics, AP sweeps, precision/recall curves, and operating points.
+    """Compute detection metrics and fixed-threshold operating points.
 
     Parameters
     ----------
@@ -141,9 +241,6 @@ def calculate_metrics(
         Configurable fixed confidence threshold for operating-point counts (TP, FP, FN, TN).
     output_dir : str | Path | None
         Directory where curve plots, CSVs, and JSON summaries are saved.
-    num_conf_steps : int
-        Number of confidence threshold steps for curve calculation.
-
     Returns
     -------
     dict[str, Any]
@@ -222,35 +319,7 @@ def calculate_metrics(
     map50_95 = float(np.mean(std_thrs)) if std_thrs else 0.0
     map20_95 = float(np.mean(list(aps.values()))) if aps else 0.0
 
-    # 5. Curve Sweep across Confidence Thresholds
-    conf_thresholds = np.linspace(0.01, 0.99, num_conf_steps)
-    precision_list = []
-    recall_list = []
-    f1_list = []
-    f2_list = []
-
-    for conf in conf_thresholds:
-        _, _, _, _, p_val, r_val, f1_val, f2_val = _match_at_confidence(
-            gt_by_img=gt_by_img,
-            pred_by_img=pred_by_img,
-            conf_thresh=conf,
-            iou_thresh=iou_match,
-            total_gt=total_gt,
-        )
-        precision_list.append(p_val)
-        recall_list.append(r_val)
-        f1_list.append(f1_val)
-        f2_list.append(f2_val)
-
-    prec_arr = np.array(precision_list)
-    rec_arr = np.array(recall_list)
-    f1_arr = np.array(f1_list)
-    f2_arr = np.array(f2_list)
-
-    best_f1_idx = int(np.argmax(f1_arr)) if len(f1_arr) > 0 else 0
-    best_f2_idx = int(np.argmax(f2_arr)) if len(f2_arr) > 0 else 0
-
-    # 16 AP thresholds from 0.20 to 0.95 with 0.05 step
+    # 5. AP thresholds from 0.20 to 0.95 with 0.05 step
     sweep_16_thrs = np.round(np.arange(0.20, 0.951, 0.05), 2)
     map_20_to_95 = [_find_ap(t) for t in sweep_16_thrs]
 
@@ -280,62 +349,12 @@ def calculate_metrics(
         "recall_at_conf":      round(r_at_conf, 4),
         "f1_at_conf":          round(f1_at_conf, 4),
         "f2_at_conf":          round(f2_at_conf, 4),
-        # Optimal curve-derived operating points
-        "best_f1_conf":        float(conf_thresholds[best_f1_idx]),
-        "best_f1":             float(f1_arr[best_f1_idx]),
-        "best_f1_precision":   float(prec_arr[best_f1_idx]),
-        "best_f1_recall":      float(rec_arr[best_f1_idx]),
-        "best_f2_conf":        float(conf_thresholds[best_f2_idx]),
-        "best_f2":             float(f2_arr[best_f2_idx]),
-        "best_f2_precision":   float(prec_arr[best_f2_idx]),
-        "best_f2_recall":      float(rec_arr[best_f2_idx]),
-        # Underlying curve data for interactive plotting
-        "curve_data": {
-            "confidence": conf_thresholds.tolist(),
-            "precision": prec_arr.tolist(),
-            "recall": rec_arr.tolist(),
-            "f1": f1_arr.tolist(),
-            "f2": f2_arr.tolist(),
-        },
     }
 
     # 6. Save Plots & Curve Data if output_dir is given
     if output_dir is not None:
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
-
-        # Save curve CSV
-        csv_file = out_path / "metrics_curves.csv"
-        with open(csv_file, "w", newline="") as fh:
-            writer = csv.writer(fh)
-            writer.writerow(["confidence_threshold", "precision", "recall", "f1", "f2"])
-            for c, p, r, _f1, _f2 in zip(conf_thresholds, prec_arr, rec_arr, f1_arr, f2_arr):
-                writer.writerow([round(c, 4), round(p, 4), round(r, 4), round(_f1, 4), round(_f2, 4)])
-
-        # Plot generator helper
-        def _plot(x, y, xlabel, ylabel, title, fname):
-            plt.figure(figsize=(7, 5))
-            plt.plot(x, y, color="#1f77b4", linewidth=2.0)
-            plt.xlabel(xlabel, fontsize=12)
-            plt.ylabel(ylabel, fontsize=12)
-            plt.title(title, fontsize=13)
-            plt.grid(True, linestyle="--", alpha=0.5)
-            plt.xlim([0.0, 1.0])
-            plt.ylim([0.0, 1.05])
-            plt.tight_layout()
-            plt.savefig(out_path / fname, dpi=180)
-            plt.close()
-
-        _plot(conf_thresholds, prec_arr, "Confidence Threshold", "Precision",
-              "Precision vs. Confidence", "precision_curve.png")
-        _plot(conf_thresholds, rec_arr, "Confidence Threshold", "Recall",
-              "Recall vs. Confidence", "recall_curve.png")
-        _plot(conf_thresholds, f1_arr, "Confidence Threshold", "F1 Score",
-              "F1 Score vs. Confidence", "f1_curve.png")
-        _plot(conf_thresholds, f2_arr, "Confidence Threshold", "F2 Score",
-              "F2 Score vs. Confidence", "f2_curve.png")
-        _plot(rec_arr, prec_arr, "Recall", "Precision",
-              f"Precision-Recall Curve (IoU={iou_match})", "pr_curve.png")
 
         # Save operating points summary
         op_summary = {
@@ -350,18 +369,6 @@ def calculate_metrics(
                 "recall": round(r_at_conf, 4),
                 "f1": round(f1_at_conf, 4),
                 "f2": round(f2_at_conf, 4),
-            },
-            "best_f1_operating_point": {
-                "optimal_confidence_threshold": float(conf_thresholds[best_f1_idx]),
-                "f1": float(f1_arr[best_f1_idx]),
-                "precision": float(prec_arr[best_f1_idx]),
-                "recall": float(rec_arr[best_f1_idx]),
-            },
-            "best_f2_operating_point": {
-                "optimal_confidence_threshold": float(conf_thresholds[best_f2_idx]),
-                "f2": float(f2_arr[best_f2_idx]),
-                "precision": float(prec_arr[best_f2_idx]),
-                "recall": float(rec_arr[best_f2_idx]),
             },
         }
         with open(out_path / "operating_points_summary.json", "w") as fh:
