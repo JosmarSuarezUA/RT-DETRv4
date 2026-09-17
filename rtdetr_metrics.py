@@ -46,7 +46,7 @@ from tools.metrics_common import (
     log_target_curves,
     log_target_plots,
     log_target_scalars,
-    plot_tsne,
+    plot_labeled_tsne,
     save_results_csv,
 )
 
@@ -678,29 +678,35 @@ def evaluate_source_against_targets(
 
     # Multi-group t-SNE and Domain Gap (MMD)
     if extract_embeddings_flag and source_name in embeddings_by_dataset:
-        embedding_groups: dict[str, np.ndarray] = {}
+        tsne_entries: list[dict[str, Any]] = []
 
         if "source_train" in embeddings_by_dataset:
-            embedding_groups[f"{source_name}_train"] = embeddings_by_dataset["source_train"]
+            tsne_entries.append({
+                "dataset_label": f"{source_name}_train",
+                "embeddings": embeddings_by_dataset["source_train"],
+                "marker": "o",
+            })
 
-        embedding_groups[f"{source_name}_test"] = embeddings_by_dataset[source_name]
+        tsne_entries.append({
+            "dataset_label": f"{source_name}_test",
+            "embeddings": embeddings_by_dataset[source_name],
+            "marker": "D",
+        })
 
         for target_name in target_names:
             if target_name != source_name and target_name in embeddings_by_dataset:
-                embedding_groups[f"{target_name}_test"] = embeddings_by_dataset[target_name]
-
-        tsne_path = plot_tsne(
-            embeddings_or_groups=embedding_groups,
-            target_or_out_path=str(result_folder / f"tsne_{source_name}_vs_targets.png"),
-            title=f"RT-DETRv4 Embeddings: {source_name} vs Targets (t-SNE)",
-        )
+                tsne_entries.append({
+                    "dataset_label": f"{target_name}_test",
+                    "embeddings": embeddings_by_dataset[target_name],
+                    "marker": "D",
+                })
 
         if run is not None:
-            try:
-                import wandb
-                run.log({f"{source_name}/tsne": wandb.Image(tsne_path)})
-            except ImportError:
-                pass
+            tsne_image = plot_labeled_tsne(
+                tsne_entries,
+                title=f"RT-DETRv4 Embeddings: {source_name} vs Targets (t-SNE)",
+            )
+            run.log({f"{source_name}/tsne": tsne_image})
 
         # Pairwise MMD calculation (source test vs target test)
         for target_name in target_names:
