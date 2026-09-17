@@ -73,15 +73,17 @@ if __name__ == "__main__":
         "A": {
             "label":      "SeaDronesSee",
             "config":     "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
-            "ann_file":   "datasets/processed/sds_jp_coco/instances_test.json",
-            "img_folder": "datasets/raw/SeaDronesSee_Juanpe/images/test",
+            "ann_file":   "/data2/detection_datasets/processed/sds_jp_coco/instances_test.json",
+            "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/test",
+            "train_ann_file":   "/data2/detection_datasets/processed/sds_jp_coco/instances_test.json",
+            "train_img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/training",
             "iou": 0.20, "conf": 0.001,
         },
         "B": {
             "label":      "SynBase",
             "config":     "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
-            "ann_file":   "datasets/processed/synbase_yolov5/instances_test.json",
-            "img_folder": "datasets/processed/synbase_yolov5/images/test",
+            "ann_file":   "/data2/detection_datasets/processed/synbase_coco/instances_test.json",
+            "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/test",
             "iou": 0.20, "conf": 0.001,
         },
     }
@@ -93,5 +95,5 @@ if __name__ == "__main__":
         dataset_configs = dataset_configs,
         source_name     = "A",
         result_folder   = "rtdetr_results",
-        wandb_project   = "rtdetr",   # optional
+        wandb_project   = "rtdetrv4",   # optional
     )

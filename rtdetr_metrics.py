@@ -39,6 +39,7 @@ from tools.metrics_common import (
     calculate_metrics,
     compute_domain_gap_mmd,
     compute_improvement,
+    get_dataset_plot_label,
     log_dataset_config,
     log_metrics_table,
     log_operating_points_table,
@@ -676,27 +677,29 @@ def evaluate_source_against_targets(
         except ImportError:
             pass
 
-    # Multi-group t-SNE and Domain Gap (MMD)
+    # Single combined t-SNE (source train + every dataset's test split) and Domain Gap (MMD)
     if extract_embeddings_flag and source_name in embeddings_by_dataset:
+        source_label = dataset_configs[source_name].get("label", source_name)
         tsne_entries: list[dict[str, Any]] = []
 
         if "source_train" in embeddings_by_dataset:
             tsne_entries.append({
-                "dataset_label": f"{source_name}_train",
+                "dataset_label": get_dataset_plot_label(source_label, "train"),
                 "embeddings": embeddings_by_dataset["source_train"],
                 "marker": "o",
             })
 
         tsne_entries.append({
-            "dataset_label": f"{source_name}_test",
+            "dataset_label": get_dataset_plot_label(source_label, "test"),
             "embeddings": embeddings_by_dataset[source_name],
             "marker": "D",
         })
 
         for target_name in target_names:
             if target_name != source_name and target_name in embeddings_by_dataset:
+                target_label = dataset_configs[target_name].get("label", target_name)
                 tsne_entries.append({
-                    "dataset_label": f"{target_name}_test",
+                    "dataset_label": get_dataset_plot_label(target_label, "test"),
                     "embeddings": embeddings_by_dataset[target_name],
                     "marker": "D",
                 })
@@ -704,9 +707,9 @@ def evaluate_source_against_targets(
         if run is not None:
             tsne_image = plot_labeled_tsne(
                 tsne_entries,
-                title=f"RT-DETRv4 Embeddings: {source_name} vs Targets (t-SNE)",
+                title=f"RT-DETRv4 Embeddings: {source_label} vs Targets (t-SNE)",
             )
-            run.log({f"{source_name}/tsne": tsne_image})
+            run.log({f"tsne": tsne_image})
 
         # Pairwise MMD calculation (source test vs target test)
         for target_name in target_names:

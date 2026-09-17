@@ -425,6 +425,18 @@ def compute_domain_gap_mmd(
     k_st = _rbf(source_embeddings, target_embeddings).mean()
     return float(k_ss + k_tt - 2.0 * k_st)
 
+def get_dataset_plot_label(dataset_label: str, split: str, context: str | None = None) -> str:
+    """Build a consistent t-SNE/legend label, e.g. 'SeaDronesSee test (afo_humans_060)'.
+
+    dataset_label : human-readable dataset name (e.g. cfg["label"]), not the
+                     internal key ("A"/"B"/"C").
+    split         : "train" or "test".
+    context       : optional extra disambiguator shown in parentheses
+                     (e.g. a dataset-folder name). Omit if not available.
+    """
+    if context:
+        return f"{dataset_label} {split} ({context})"
+    return f"{dataset_label} {split}"
 
 def plot_tsne(
     embeddings_or_groups: dict[str, np.ndarray] | np.ndarray,
@@ -504,7 +516,14 @@ def plot_tsne(
             color=color,
         )
 
-    plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0.0)
+    # CAMBIO: Leyenda cuadrada, dentro del gráfico y con borde negro sutil
+    plt.legend(
+        loc="upper right", 
+        fancybox=False, 
+        edgecolor="black",
+        framealpha=0.9
+    )
+    
     plt.title(title, fontsize=13)
     plt.grid(True, linestyle="--", alpha=0.4)
     plt.tight_layout()
@@ -514,6 +533,7 @@ def plot_tsne(
     plt.close()
 
     return str(Path(save_path).resolve())
+
 
 def plot_labeled_tsne(
     embedding_groups: list[dict[str, Any]],
@@ -585,8 +605,8 @@ def plot_labeled_tsne(
     plt.title(title, fontsize=13)
     plt.xlabel("t-SNE 1")
     plt.ylabel("t-SNE 2")
-    plt.legend(title="Dataset", bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0.0)
-    plt.tight_layout()
+    plt.legend(title="Dataset",  loc="upper right", borderaxespad=0.0)
+    # # plt.tight_layout()
 
     fig = plt.gcf()
     image = wandb.Image(fig)
