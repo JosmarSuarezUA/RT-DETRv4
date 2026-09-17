@@ -490,7 +490,7 @@ def plot_tsne(
     ).fit_transform(combined)
 
     plt.figure(figsize=(8, 7))
-    cmap = plt.cm.get_cmap("tab10", len(valid_groups))
+    cmap = mpl.colormaps["tab10"].resampled(len(valid_groups))
 
     for idx, name in enumerate(valid_groups.keys()):
         mask = labels == name
@@ -515,7 +515,83 @@ def plot_tsne(
 
     return str(Path(save_path).resolve())
 
+def plot_labeled_tsne(
+    embedding_groups: list[dict[str, Any]],
+    title: str = "Embedding Space (t-SNE)",
+    perplexity: int = 30,
+    random_state: int = 42,
+):
+    """Visualize multiple embedding groups in 2D as a single wandb.Image.
 
+    Unlike ``plot_tsne`` (which writes a PNG to disk and gives every group a
+    single flat style), this groups points by ``dataset_label`` while letting
+    each *entry* carry its own marker -- e.g. a dataset's train split can be
+    "o" and its test split "D" while still using its own legend/color. Meant
+    to replace one-off/individual t-SNE calls with a single richer plot
+    logged straight to W&B.
+
+    Each entry in embedding_groups must include:
+      - dataset_label: label shown in the legend
+      - embeddings: np.ndarray of shape (n_samples, feature_dim)
+      - marker: matplotlib marker symbol for the points in that entry
+
+    Returns
+    -------
+    wandb.Image
+        Ready to pass straight into ``run.log({...})``.
+    """
+    _require_wandb()
+    import wandb
+    from sklearn.manifold import TSNE
+
+    entries = [e for e in embedding_groups if e.get("embeddings") is not None and len(e["embeddings"])]
+    if not entries:
+        raise ValueError("No embeddings provided for t-SNE plotting.")
+
+    combined = np.vstack([entry["embeddings"] for entry in entries])
+    eff_perplexity = max(1, min(perplexity, len(combined) - 1))
+    proj = TSNE(
+        n_components=2,
+        init="pca",
+        perplexity=eff_perplexity,
+        random_state=random_state,
+    ).fit_transform(combined)
+
+    colors = plt.cm.tab10.colors
+    cursor = 0
+    grouped_entries: dict[str, list[tuple[dict[str, Any], int, int]]] = {}
+
+    for entry in entries:
+        n_points = len(entry["embeddings"])
+        grouped_entries.setdefault(entry["dataset_label"], []).append((entry, cursor, cursor + n_points))
+        cursor += n_points
+
+    plt.figure(figsize=(7, 7))
+    for index, (dataset_label, slices) in enumerate(grouped_entries.items()):
+        x_values, y_values = [], []
+        marker = slices[0][0]["marker"]
+        for entry, start, end in slices:
+            x_values.extend(proj[start:end, 0].tolist())
+            y_values.extend(proj[start:end, 1].tolist())
+        plt.scatter(
+            x_values, y_values,
+            label=dataset_label,
+            alpha=0.75, s=22,
+            c=[colors[index % len(colors)]],
+            marker=marker,
+            edgecolors="none",
+        )
+
+    plt.title(title, fontsize=13)
+    plt.xlabel("t-SNE 1")
+    plt.ylabel("t-SNE 2")
+    plt.legend(title="Dataset", bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0.0)
+    plt.tight_layout()
+
+    fig = plt.gcf()
+    image = wandb.Image(fig)
+    plt.close(fig)
+    return image
 # ---------------------------------------------------------------------------
 # 4. CSV Export
 # ---------------------------------------------------------------------------
