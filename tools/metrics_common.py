@@ -23,8 +23,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-matplotlib.use("Agg")
+import matplotlib as mpl
+mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -490,7 +490,7 @@ def plot_tsne(
     ).fit_transform(combined)
 
     plt.figure(figsize=(8, 7))
-    cmap = plt.cm.get_cmap("tab10", len(valid_groups))
+    cmap = mpl.colormaps["tab10"].resampled(len(valid_groups))
 
     for idx, name in enumerate(valid_groups.keys()):
         mask = labels == name
