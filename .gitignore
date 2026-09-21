@@ -215,3 +215,4 @@ wandb/
 
 eval_output/
 logs/
+rtdetr_results/

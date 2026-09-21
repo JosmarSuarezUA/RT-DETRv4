@@ -637,6 +637,8 @@ def evaluate_source_against_targets(
         output_dir=source_val_curve_dir,
     )
     source_conf_threshold = source_val_curves["best_f2_conf"]
+    if run is not None:
+        log_target_curves(run, f"{source_name}/val", source_val_curves["curve_data"])
     if verbose:
         print(f"[*] Source validation best_f2_conf: {source_conf_threshold:.4f}")
 
@@ -873,7 +875,6 @@ def _main_cli():
     dataset_configs = {
         args.source_name: {
             "label": args.dataset_label,
-            "config": args.config,
             "splits": {
                 "test": {
                     "ann_file": args.ann_file,

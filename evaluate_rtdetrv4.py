@@ -38,14 +38,12 @@ Multi-target evaluation (programmatic, not CLI)::
     dataset_configs = {
         "A": {
             "label":      "SeaDronesSee",
-            "config":     "configs/rtdetr/rtdetr_r50vd.yml",
             "ann_file":   "datasets/A/test.json",
             "img_folder": "datasets/A/images/test",
             "iou": 0.20, "conf": 0.001,
         },
         "B": {
             "label":      "SynBase",
-            "config":     "configs/rtdetr/rtdetr_r50vd.yml",
             "ann_file":   "datasets/B/test.json",
             "img_folder": "datasets/B/images/test",
             "iou": 0.20, "conf": 0.001,
@@ -72,7 +70,6 @@ if __name__ == "__main__":
     dataset_configs = {
         "A": {
             "label":      "SeaDronesSee",
-            "config":     "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
             "splits":{
                 "train":{
                     "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_train.json",
@@ -91,7 +88,6 @@ if __name__ == "__main__":
         },
         "B": {
             "label":      "SynBase",
-            "config":     "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
             "splits": {
                 "test": {
                     "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_test.json",
