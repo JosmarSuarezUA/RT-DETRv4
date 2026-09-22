@@ -770,11 +770,17 @@ def log_metrics_table(
         "map20_95",
         "map50_95",
         "map_20_to_95",
+        "conf_threshold",
         "precision_mean",
         "recall_mean",
         "confidence_mean",
+        "confidence_median",
         "confidence_std",
         "n_detections",
+        "th_confidence_mean",
+        "th_confidence_median",
+        "th_confidence_std",
+        "th_n_detections"
     ]
 
     rows = []
@@ -787,11 +793,17 @@ def log_metrics_table(
             r.get("map20_95", 0.0),
             r.get("map50_95", 0.0),
             r.get("map_20_to_95", []),
+            r.get("conf_threshold", None),
             r.get("precision_mean", 0.0),
             r.get("recall_mean", 0.0),
             r.get("confidence_mean", None),
+            r.get("confidence_median", None),
             r.get("confidence_std", None),
             r.get("n_detections", 0),
+            r.get("th_confidence_mean", None),
+            r.get("th_confidence_std", None),
+            r.get("th_confidence_median", None),
+            r.get("th_n_detections", 0),
         ]
         rows.append(row)
 

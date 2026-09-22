@@ -401,16 +401,32 @@ def calculate_embeddings(
 # 5. Confidence Summary
 # ---------------------------------------------------------------------------
 
-def compute_confidence_mean(predictions: list[dict]) -> dict[str, Any]:
-    """Calculate mean and standard deviation of prediction confidence scores."""
-    if not predictions:
-        return {"confidence_mean": None, "confidence_std": None, "n_detections": 0}
+def compute_confidence_stats(
+    predictions: list[dict],
+    threshold: float = 0.0,
+    prefix: str = "",
+) -> dict[str, Any]:
+    """Calculate confidence statistics for predictions above a threshold."""
 
-    confs = np.array([p["score"] for p in predictions], dtype=np.float32)
+    confs = np.array(
+        [p["score"] for p in predictions if p["score"] >= threshold],
+        dtype=np.float32,
+    )
+
+    prefix_space = f"{prefix}_" if prefix else "",
+    if len(confs) == 0:
+        return {
+            f"{prefix_space}confidence_mean": None,
+            f"{prefix_space}confidence_std": None,
+            f"{prefix_space}confidence_median": None,
+            f"{prefix_space}n_detections": 0,
+        }
+
     return {
-        "confidence_mean": float(confs.mean()),
-        "confidence_std": float(confs.std()),
-        "n_detections": int(len(confs)),
+        f"{prefix_space}confidence_mean": float(confs.mean()),
+        f"{prefix_space}confidence_std": float(confs.std()),
+        f"{prefix_space}confidence_median": float(np.median(confs)),
+        f"{prefix_space}n_detections": int(len(confs)),
     }
 
 
@@ -535,7 +551,8 @@ def run_full_evaluation(
     )
 
     # 2. Confidence stats
-    conf_metrics = compute_confidence_mean(predictions)
+    conf_metrics = compute_confidence_stats(predictions)
+    th_conf_metrics = compute_confidence_stats(predictions, threshold=conf, prefix="th")
 
     # 3. Embeddings
     embeddings = None
@@ -564,6 +581,7 @@ def run_full_evaluation(
         "ann_file": ann_file,
         **det_metrics,
         **conf_metrics,
+        **th_conf_metrics,
     }
 
     return result, embeddings, file_names, plots_dir
