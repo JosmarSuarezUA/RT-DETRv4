@@ -70,6 +70,7 @@ if __name__ == "__main__":
     dataset_configs = {
         "A": {
             "label":      "SeaDronesSee",
+            "checkpoint":      "outputs/sds_jp_transfer_rtv4_hgnetv2_s_coco/best_stg1.pth",
             "splits":{
                 "train":{
                     "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_train.json",
@@ -88,6 +89,7 @@ if __name__ == "__main__":
         },
         "B": {
             "label":      "SynBase",
+            "checkpoint":      "outputs/synbase_rtv4_hgnetv2_s_coco/best_stg1.pth",
             "splits": {
                 "test": {
                     "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_test.json",
@@ -95,11 +97,11 @@ if __name__ == "__main__":
                 },
                 "val":{
                     "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_val.json",
-                    "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/test"
+                    "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/val"
                 },
-                "test":{
-                    "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_test.json",
-                    "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/test"
+                "train":{
+                    "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_train.json",
+                    "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/train"
                 }
             },
             "iou": 0.20, "conf": 0.001,
@@ -109,11 +111,11 @@ if __name__ == "__main__":
         run_eval(
             run_name        = f"{dataset['label']}_metrics",
             config_path     = "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
-            checkpoint_path = "outputs/sds_jp_transfer_rtv4_hgnetv2_s_coco/best_stg1.pth",
+            checkpoint_path = dataset['checkpoint'],
             dataset_configs = dataset_configs   ,
             source_name     = dataset_id,
-            result_folder   = "rtdetr_results",
+            result_folder   = f"rtdetr_results/source_{dataset['label']}",
             wandb_project   = "rtdetrv4",   # optional
-        )    
-    
-    
+        )
+
+
