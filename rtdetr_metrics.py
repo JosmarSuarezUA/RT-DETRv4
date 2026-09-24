@@ -413,7 +413,7 @@ def compute_confidence_stats(
         dtype=np.float32,
     )
 
-    prefix_space = f"{prefix}_" if prefix else "",
+    prefix_space = f"{prefix}_" if prefix else ""
     if len(confs) == 0:
         return {
             f"{prefix_space}confidence_mean": None,
@@ -733,7 +733,6 @@ def evaluate_source_against_targets(
 
     if run is not None:
         log_metrics_table(run, results, table_name="Table 1: Metrics")
-        log_operating_points_table(run, results, table_name="Table 2: Operating Points & Domain Gap")
         log_results_table(run, results, table_name="results_table")
         try:
             import wandb

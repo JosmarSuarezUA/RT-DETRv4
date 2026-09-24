@@ -751,126 +751,97 @@ def log_target_curves(run: Any, target_name: str, curve_data: dict[str, list[flo
         ),
     })
 
+def _build_and_log_table(
+    run: Any,
+    results_list: list[dict],
+    table_name: str,
+    column_spec: dict[str, tuple[str, Any]],
+    source_key: str = "source_name",
+    target_key: str = "target_name",
+) -> None:
+    """
+    Shared helper: build a wandb.Table from a column spec and log it.
+
+    Each entry in column_spec maps:
+        column_name -> (result_dict_key, default_value)
+
+    Source/target fields are resolved with dataset-name aliases automatically.
+    """
+    import wandb
+
+    if not results_list:
+        return
+
+    columns = list(column_spec.keys())
+    rows = []
+
+    for r in results_list:
+        # Resolve source/target aliases once per row
+        resolved = {
+            source_key: r.get("source_dataset_name", r.get(source_key, "")),
+            target_key: r.get("target_dataset_name", r.get(target_key, "")),
+            **r,
+        }
+        row = [resolved.get(key, default) for _, (key, default) in column_spec.items()]
+        rows.append(row)
+
+    table = wandb.Table(columns=columns, data=rows)
+    run.log({table_name: table})
+
 
 def log_metrics_table(
     run: Any,
     results_list: list[dict],
     table_name: str = "Table 1: Metrics",
 ) -> None:
-    """Log interactive browsable metrics table with exact ordered columns."""
+    """Log an interactive, browsable metrics table with exact ordered columns."""
     _require_wandb()
-    import wandb
 
-    if not results_list:
-        return
+    column_spec = {
+        "source_name":          ("source_name",          ""),
+        "target_name":          ("target_name",          ""),
+        "map20_95":             ("map20_95",              0.0),
+        "map50_95":             ("map50_95",              0.0),
+        "map_20_to_95":         ("map_20_to_95",          []),
+        "conf_threshold":       ("conf_threshold",        None),
+        "iou_match":            ("iou_match",             None),
+        "precision_mean":       ("precision_mean",        0.0),
+        "recall_mean":          ("recall_mean",           0.0),
+        "confidence_mean":      ("confidence_mean",       None),
+        "confidence_median":    ("confidence_median",     None),
+        "confidence_std":       ("confidence_std",        None),
+        "n_detections":         ("n_detections",          0),
+        "th_confidence_mean":   ("th_confidence_mean",    None),
+        "th_confidence_median": ("th_confidence_median",  None),
+        "th_confidence_std":    ("th_confidence_std",     None),
+        "th_n_detections":      ("th_n_detections",       0),
+    }
 
-    columns = [
-        "source_name",
-        "target_name",
-        "map20_95",
-        "map50_95",
-        "map_20_to_95",
-        "conf_threshold",
-        "precision_mean",
-        "recall_mean",
-        "confidence_mean",
-        "confidence_median",
-        "confidence_std",
-        "n_detections",
-        "th_confidence_mean",
-        "th_confidence_median",
-        "th_confidence_std",
-        "th_n_detections"
-    ]
-
-    rows = []
-    for r in results_list:
-        source_id = r.get("source_dataset_name", r.get("source_name", ""))
-        target_id = r.get("target_dataset_name", r.get("target_name", ""))
-        row = [
-            source_id,
-            target_id,
-            r.get("map20_95", 0.0),
-            r.get("map50_95", 0.0),
-            r.get("map_20_to_95", []),
-            r.get("conf_threshold", None),
-            r.get("precision_mean", 0.0),
-            r.get("recall_mean", 0.0),
-            r.get("confidence_mean", None),
-            r.get("confidence_median", None),
-            r.get("confidence_std", None),
-            r.get("n_detections", 0),
-            r.get("th_confidence_mean", None),
-            r.get("th_confidence_std", None),
-            r.get("th_confidence_median", None),
-            r.get("th_n_detections", 0),
-        ]
-        rows.append(row)
-
-    table = wandb.Table(columns=columns, data=rows)
-    run.log({table_name: table})
+    _build_and_log_table(run, results_list, table_name, column_spec)
 
 
 def log_operating_points_table(
     run: Any,
     results_list: list[dict],
-    table_name: str = "Table 2: Operating Points & Domain Gap",
+    table_name: str = "Table 2: Results of F2 Curves in Source Validation",
 ) -> None:
-    """Log supplemental table for fixed operating points, curve optimal points, and domain gap."""
+    """Log a supplemental table for fixed operating points, curve optimal points, and domain gap."""
     _require_wandb()
-    import wandb
 
-    if not results_list:
-        return
+    column_spec = {
+        "source_name":       ("source_name",       ""),
+        "target_name":       ("target_name",       ""),
+        "best_f1_conf":      ("best_f1_conf",      None),
+        "best_f1":           ("best_f1",           None),
+        "best_f2_conf":      ("best_f2_conf",      None),
+        "best_f2":           ("best_f2",           None),
+        "precision_at_conf": ("precision_at_conf", None),
+        "recall_at_conf":    ("recall_at_conf",    None),
+        "f1_at_conf":        ("f1_at_conf",        None),
+        "f2_at_conf":        ("f2_at_conf",        None),
+    }
 
-    columns = [
-        "source_name",
-        "target_name",
-        "conf_threshold",
-        "iou_match",
-        "tp",
-        "fp",
-        "fn",
-        "tn",
-        "precision_at_conf",
-        "recall_at_conf",
-        "f1_at_conf",
-        "f2_at_conf",
-        "best_f1_conf",
-        "best_f1",
-        "best_f2_conf",
-        "best_f2",
-        "domain_gap_mmd",
-    ]
-
-    rows = []
-    for r in results_list:
-        source_id = r.get("source_dataset_name", r.get("source_name", ""))
-        target_id = r.get("target_dataset_name", r.get("target_name", ""))
-        row = [
-            source_id,
-            target_id,
-            r.get("conf_threshold", None),
-            r.get("iou_match", None),
-            r.get("tp", 0),
-            r.get("fp", 0),
-            r.get("fn", 0),
-            r.get("tn", 0),
-            r.get("precision_at_conf", None),
-            r.get("recall_at_conf", None),
-            r.get("f1_at_conf", None),
-            r.get("f2_at_conf", None),
-            r.get("best_f1_conf", None),
-            r.get("best_f1", None),
-            r.get("best_f2_conf", None),
-            r.get("best_f2", None),
-            r.get("domain_gap_mmd", None),
-        ]
-        rows.append(row)
-
-    table = wandb.Table(columns=columns, data=rows)
-    run.log({table_name: table})
-
+    _build_and_log_table(run, results_list, table_name, column_spec)
 
 def log_results_table(
     run: Any,

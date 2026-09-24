@@ -92,18 +92,28 @@ if __name__ == "__main__":
                 "test": {
                     "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_test.json",
                     "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/test"
+                },
+                "val":{
+                    "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_val.json",
+                    "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/test"
+                },
+                "test":{
+                    "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_test.json",
+                    "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/test"
                 }
             },
             "iou": 0.20, "conf": 0.001,
         },
     }
+    for dataset_id, dataset in dataset_configs.items():
+        run_eval(
+            run_name        = f"{dataset['label']}_metrics",
+            config_path     = "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
+            checkpoint_path = "outputs/sds_jp_transfer_rtv4_hgnetv2_s_coco/best_stg1.pth",
+            dataset_configs = dataset_configs   ,
+            source_name     = dataset_id,
+            result_folder   = "rtdetr_results",
+            wandb_project   = "rtdetrv4",   # optional
+        )    
     
-    run_eval(
-        run_name        = "sds_jp_metrics",
-        config_path     = "configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml",
-        checkpoint_path = "outputs/sds_jp_transfer_rtv4_hgnetv2_s_coco/best_stg1.pth",
-        dataset_configs = dataset_configs,
-        source_name     = "A",
-        result_folder   = "rtdetr_results",
-        wandb_project   = "rtdetrv4",   # optional
-    )
+    
