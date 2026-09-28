@@ -8,7 +8,8 @@ Ultralytics/YOLO (da_metrics.py), and future architectures (e.g. D-FINE).
 
 Sections
 --------
-1.  Detection metrics & curves (COCOeval, mAP sweep, P/R curves, fixed & optimal operating points)
+1.  Detection metrics & curves (COCOeval, mAP sweep, P/R curves, fixed & optimal operating points,
+    confidence statistics)
 2.  Improvement deltas         (compare adapted vs. baseline run)
 3.  Domain gap & t-SNE         (MMD metric + multi-group t-SNE visualization)
 4.  CSV export
@@ -214,6 +215,35 @@ def calculate_conf_curves(
         _plot(recall_array, precision_array, "Recall", "Precision", f"Precision-Recall Curve (IoU={iou_match})", "pr_curve.png")
 
     return result
+
+
+def compute_confidence_stats(
+    predictions: list[dict],
+    threshold: float = 0.0,
+    prefix: str = "",
+) -> dict[str, Any]:
+    """Calculate confidence statistics for predictions above a threshold."""
+
+    confs = np.array(
+        [p["score"] for p in predictions if p["score"] >= threshold],
+        dtype=np.float32,
+    )
+
+    prefix_space = f"{prefix}_" if prefix else ""
+    if len(confs) == 0:
+        return {
+            f"{prefix_space}confidence_mean": None,
+            f"{prefix_space}confidence_std": None,
+            f"{prefix_space}confidence_median": None,
+            f"{prefix_space}n_detections": 0,
+        }
+
+    return {
+        f"{prefix_space}confidence_mean": float(confs.mean()),
+        f"{prefix_space}confidence_std": float(confs.std()),
+        f"{prefix_space}confidence_median": float(np.median(confs)),
+        f"{prefix_space}n_detections": int(len(confs)),
+    }
 
 
 def calculate_metrics(
@@ -665,10 +695,12 @@ def log_dataset_config(
     source_name: str,
     config_path: str | None = None,
     checkpoint_path: str | None = None,
+    model_name: str | None = None,
 ) -> None:
     """Summarize run and dataset configurations in run.config."""
     _require_wandb()
     config_update: dict = {
+        "model_name":           model_name,
         "source_dataset_name":  source_name,
         "source_dataset_label": dataset_configs[source_name].get("label", source_name),
         "target_dataset_names": [n for n in dataset_configs if n != source_name],
