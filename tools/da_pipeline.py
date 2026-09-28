@@ -14,7 +14,8 @@ Protocol (one source checkpoint)
 2. Every target ``test`` split (source included) -> detection metrics at that
    threshold, confidence statistics and image embeddings.
 3. Source ``train`` split (optional) -> embeddings.
-4. Combined t-SNE + pairwise MMD (source test vs each target test).
+4. Pairwise MMD (source test vs each target test, one median-heuristic
+   bandwidth per source) + combined t-SNE.
 
 Sections
 --------
@@ -46,9 +47,11 @@ from tools.metrics_common import (
     get_dataset_plot_label,
     log_dataset_config,
     log_metrics_table,
+    log_operating_points_table,
     log_results_table,
     log_target_curves,
     log_target_scalars,
+    median_heuristic_gamma,
     plot_labeled_tsne,
     save_results_csv,
 )
@@ -230,8 +233,12 @@ def select_threshold_on_source_val(
     result_folder: Path,
     run: Any = None,
     verbose: bool = True,
-) -> float:
-    """Compute confidence curves on the source ``val`` split and return ``best_f2_conf``."""
+) -> dict[str, float]:
+    """Compute confidence curves on the source ``val`` split.
+
+    Returns the optimal operating points (``best_f1_conf``, ``best_f2_conf``, ...);
+    ``best_f2_conf`` is the threshold applied to every target.
+    """
     source_cfg = dataset_configs[source_name]
     val_split = get_split(source_cfg, "val", source_name)
 
@@ -252,10 +259,9 @@ def select_threshold_on_source_val(
     )
     if run is not None:
         log_target_curves(run, f"{source_name}/val", curves["curve_data"])
-    threshold = curves["best_f2_conf"]
     if verbose:
-        print(f"[*] Source validation best_f2_conf: {threshold:.4f}")
-    return threshold
+        print(f"[*] Source validation best_f2_conf: {curves['best_f2_conf']:.4f}")
+    return {k: v for k, v in curves.items() if k != "curve_data"}
 
 
 def evaluate_source_against_targets(
@@ -291,9 +297,10 @@ def evaluate_source_against_targets(
             model_name=model_info.get("model_name"),
         )
 
-    source_conf_threshold = select_threshold_on_source_val(
+    val_optimum = select_threshold_on_source_val(
         adapter, dataset_configs, source_name, result_folder, run=run, verbose=verbose,
     )
+    source_conf_threshold = val_optimum["best_f2_conf"]
 
     results: list[dict] = []
     embeddings_by_dataset: dict[str, np.ndarray] = {}
@@ -319,14 +326,12 @@ def evaluate_source_against_targets(
         result["source_dataset_label"] = dataset_configs[source_name].get("label", source_name)
         result["target_dataset_name"] = target_name
         result["target_dataset_label"] = cfg_t.get("label", target_name)
+        result.update({f"val_{k}": v for k, v in val_optimum.items()})
         results.append(result)
 
         if emb is not None:
             embeddings_by_dataset[target_name] = emb
             np.save(result_folder / f"embeddings_{source_name}_to_{target_name}.npy", emb)
-
-        if run is not None:
-            log_target_scalars(run, target_name, result)
 
     # Optional: source training embeddings for complete domain visualization
     src_train_split = _split_available(dataset_configs[source_name], "train")
@@ -340,12 +345,21 @@ def evaluate_source_against_targets(
             np.save(result_folder / f"embeddings_{source_name}_train.npy", output.embeddings)
             embeddings_by_dataset["source_train"] = output.embeddings
 
+    # Domain gap (MMD) between source test and each target test embedding set
+    if extract_embeddings_flag and source_name in embeddings_by_dataset:
+        add_domain_gaps(results, embeddings_by_dataset, source_name, verbose=verbose)
+
+    if run is not None:
+        for result in results:
+            log_target_scalars(run, result["target_dataset_name"], result)
+
     # Save summary CSV
     csv_path = result_folder / f"source{source_name}_results.csv"
     save_results_csv(results, str(csv_path))
 
     if run is not None:
         log_metrics_table(run, results, table_name="Table 1: Metrics")
+        log_operating_points_table(run, results)
         log_results_table(run, results, table_name="results_table")
         try:
             import wandb
@@ -355,23 +369,46 @@ def evaluate_source_against_targets(
         except ImportError:
             pass
 
-    # Single combined t-SNE (source train + every dataset's test split) and Domain Gap (MMD)
-    if extract_embeddings_flag and source_name in embeddings_by_dataset:
-        _log_embedding_space(
-            adapter, dataset_configs, source_name, target_names, embeddings_by_dataset, run, verbose,
-        )
+    # Single combined t-SNE (source train + every dataset's test split)
+    if extract_embeddings_flag and source_name in embeddings_by_dataset and run is not None:
+        _log_tsne(adapter, dataset_configs, source_name, target_names, embeddings_by_dataset, run)
 
     return results, embeddings_by_dataset
 
 
-def _log_embedding_space(
+def add_domain_gaps(
+    results: list[dict],
+    embeddings_by_dataset: dict[str, np.ndarray],
+    source_name: str,
+    verbose: bool = True,
+) -> None:
+    """Add ``domain_gap_mmd`` (+ the kernel ``domain_gap_mmd_gamma``) to each result row.
+
+    One RBF bandwidth, from the median heuristic on the source test embeddings,
+    is shared by all targets of the source so their gaps are directly comparable.
+    The in-domain row (target == source) gets None.
+    """
+    source_emb = embeddings_by_dataset[source_name]
+    gamma = median_heuristic_gamma(source_emb)
+    for result in results:
+        target_name = result["target_dataset_name"]
+        if target_name == source_name or target_name not in embeddings_by_dataset:
+            result["domain_gap_mmd"] = None
+            continue
+        gap = compute_domain_gap_mmd(source_emb, embeddings_by_dataset[target_name], gamma=gamma)
+        result["domain_gap_mmd"] = gap
+        result["domain_gap_mmd_gamma"] = gamma
+        if verbose:
+            print(f"[*] Domain Gap MMD ({source_name} -> {target_name}): {gap:.6f}")
+
+
+def _log_tsne(
     adapter: DetectorAdapter,
     dataset_configs: dict,
     source_name: str,
     target_names: list[str],
     embeddings_by_dataset: dict[str, np.ndarray],
     run: Any,
-    verbose: bool,
 ) -> None:
     source_label = dataset_configs[source_name].get("label", source_name)
     tsne_entries: list[dict[str, Any]] = []
@@ -398,25 +435,11 @@ def _log_embedding_space(
                 "marker": "D",
             })
 
-    if run is not None:
-        tsne_image = plot_labeled_tsne(
-            tsne_entries,
-            title=f"{adapter.name} Embeddings: {source_label} vs Targets (t-SNE)",
-        )
-        run.log({"tsne": tsne_image})
-
-    # Pairwise MMD calculation (source test vs target test)
-    for target_name in target_names:
-        if target_name == source_name or target_name not in embeddings_by_dataset:
-            continue
-        gap = compute_domain_gap_mmd(
-            embeddings_by_dataset[source_name],
-            embeddings_by_dataset[target_name],
-        )
-        if verbose:
-            print(f"[*] Domain Gap MMD ({source_name} -> {target_name}): {gap:.6f}")
-        if run is not None:
-            run.summary[f"{target_name}/domain_gap_mmd"] = gap
+    tsne_image = plot_labeled_tsne(
+        tsne_entries,
+        title=f"{adapter.name} Embeddings: {source_label} vs Targets (t-SNE)",
+    )
+    run.log({"tsne": tsne_image})
 
 
 # ---------------------------------------------------------------------------
