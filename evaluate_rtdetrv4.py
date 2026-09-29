@@ -3,59 +3,29 @@
 evaluate_rtdetrv4.py
 ====================
 Cross-domain evaluation of RT-DETRv4: every source checkpoint is evaluated on
-the test split of every dataset (see ``tools/da_pipeline.py`` for the protocol).
+the test split of every dataset. The protocol, metrics and adapter live in the
+shared ``da-eval`` package (https://github.com/JosmarSuarezUA/da-eval).
 
-- ``dataset_configs`` describes data only (splits + evaluation thresholds) and
-  is shared across models.
+- Datasets are defined once in ``da-eval/configs/datasets.yaml`` (shared by all models).
 - ``CHECKPOINTS`` maps each source dataset to the checkpoint trained on it.
-- Model settings (config, batch size, device, ...) go to ``RTDETRAdapter``.
+- Model settings (config, batch size, device, ...) go to ``RTDETRv4Adapter``.
 
-For a single-dataset CLI evaluation use ``python rtdetr_metrics.py --help``.
+Equivalent CLI::
+
+    uv run da-eval --model rtdetrv4 \\
+        --config configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml \\
+        --datasets ../da-eval/configs/datasets.yaml \\
+        --checkpoint A=outputs/sds_jp_transfer_rtv4_hgnetv2_s_coco/best_stg1.pth \\
+        --checkpoint B=outputs/synbase_rtv4_hgnetv2_s_coco/best_stg1.pth \\
+        --result-root rtdetr_results --wandb-project rtdetrv4
 """
 
-from rtdetr_metrics import RTDETRAdapter
-from tools.da_pipeline import run_all_sources
+from pathlib import Path
 
-dataset_configs = {
-    "A": {
-        "label": "SeaDronesSee",
-        "splits": {
-            "train": {
-                "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_train.json",
-                "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/training",
-            },
-            "val": {
-                "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_val.json",
-                "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/validation",
-            },
-            "test": {
-                "ann_file": "/data2/detection_datasets/processed/sds_jp_coco/instances_test.json",
-                "img_folder": "/data2/detection_datasets/raw/SeaDronesSee_Juanpe/images/test",
-            },
-        },
-        "iou": 0.20,          # IoU for matching (curves + fixed operating point)
-        "min_score": 0.001,   # drop predictions below this score
-    },
-    "B": {
-        "label": "SynBase",
-        "splits": {
-            "train": {
-                "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_train.json",
-                "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/train",
-            },
-            "val": {
-                "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_val.json",
-                "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/val",
-            },
-            "test": {
-                "ann_file": "/data2/detection_datasets/processed/synbase_coco/instances_test.json",
-                "img_folder": "/data2/detection_datasets/processed/synbase_yolov5/images/test",
-            },
-        },
-        "iou": 0.20,
-        "min_score": 0.001,
-    },
-}
+from da_eval import load_dataset_configs, run_all_sources
+from da_eval.adapters.yaml_engine import RTDETRv4Adapter
+
+DATASETS = Path(__file__).resolve().parent.parent / "da-eval" / "configs" / "datasets.yaml"
 
 CHECKPOINTS = {
     "A": "outputs/sds_jp_transfer_rtv4_hgnetv2_s_coco/best_stg1.pth",
@@ -63,11 +33,11 @@ CHECKPOINTS = {
 }
 
 if __name__ == "__main__":
-    adapter = RTDETRAdapter(config_path="configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml")
+    adapter = RTDETRv4Adapter(config_path="configs/rtv4/rtv4_hgnetv2_s_coco_custom.yml")
     run_all_sources(
         adapter,
         checkpoints=CHECKPOINTS,
-        dataset_configs=dataset_configs,
+        dataset_configs=load_dataset_configs(DATASETS),
         result_root="rtdetr_results",
         wandb_project="rtdetrv4",   # optional
     )
