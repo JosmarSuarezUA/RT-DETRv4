@@ -30,6 +30,7 @@ DATASETS = Path(__file__).resolve().parent.parent / "da-eval" / "configs" / "dat
 CHECKPOINTS = {
     "A": "outputs/sds_jp_transfer_rtv4_hgnetv2_s_coco/best_stg1.pth",
     "B": "outputs/synbase_rtv4_hgnetv2_s_coco/best_stg1.pth",
+    "C": "outputs/afo_rtv4_hgnetv2_s_coco/best_stg1.pth"
 }
 
 if __name__ == "__main__":
