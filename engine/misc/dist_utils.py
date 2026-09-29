@@ -125,9 +125,16 @@ def is_main_process():
     return get_rank() == 0
 
 
-def save_on_master(*args, **kwargs):
+def save_on_master(obj, f, *args, **kwargs):
     if is_main_process():
-        torch.save(*args, **kwargs)
+        if isinstance(f, (str, os.PathLike)):
+            # Write to a temp file and rename atomically, so readers never see
+            # a partially written checkpoint and a crash can't corrupt the old one.
+            tmp = f"{os.fspath(f)}.tmp"
+            torch.save(obj, tmp, *args, **kwargs)
+            os.replace(tmp, f)
+        else:
+            torch.save(obj, f, *args, **kwargs)
 
 
 

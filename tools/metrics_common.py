@@ -8,7 +8,8 @@ Ultralytics/YOLO (da_metrics.py), and future architectures (e.g. D-FINE).
 
 Sections
 --------
-1.  Detection metrics & curves (COCOeval, mAP sweep, P/R curves, fixed & optimal operating points)
+1.  Detection metrics & curves (COCOeval, mAP sweep, P/R curves, fixed & optimal operating points,
+    confidence statistics)
 2.  Improvement deltas         (compare adapted vs. baseline run)
 3.  Domain gap & t-SNE         (MMD metric + multi-group t-SNE visualization)
 4.  CSV export
@@ -58,19 +59,17 @@ def _box_iou_numpy(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     return inter / union
 
 
-def _match_at_confidence(
+def _match_counts_per_category(
     gt_by_img: dict[int, dict[int, list[list[float]]]],
     pred_by_img: dict[int, dict[int, list[dict]]],
     conf_thresh: float,
     iou_thresh: float,
-    total_gt: int,
-) -> tuple[int, int, int, int, float, float, float, float]:
+) -> dict[int, list[int]]:
     """
-    Match predictions against ground truth at a specific confidence threshold.
-    Returns (tp, fp, fn, tn, precision, recall, f1, f2).
+    Greedily match predictions (highest score first) against ground truth at a
+    specific confidence threshold. Returns {category_id: [tp, fp]}.
     """
-    tp = 0
-    fp = 0
+    counts: dict[int, list[int]] = defaultdict(lambda: [0, 0])
 
     # Match predictions against GT for categories present in GT
     for img_id, cat_dict in gt_by_img.items():
@@ -89,26 +88,48 @@ def _match_at_confidence(
                 best_idx = int(ious.argmax()) if ious.size > 0 else -1
 
                 if best_idx >= 0 and ious[best_idx] >= iou_thresh:
-                    tp += 1
+                    counts[cat_id][0] += 1
                     matched[best_idx] = True
                 else:
-                    fp += 1
+                    counts[cat_id][1] += 1
 
     # Add false positives for predicted categories not present in GT for that image
     for img_id, cat_dict in pred_by_img.items():
         for cat_id, p_list in cat_dict.items():
             if cat_id not in gt_by_img.get(img_id, {}):
-                fp += sum(1 for p in p_list if p["score"] >= conf_thresh)
+                counts[cat_id][1] += sum(1 for p in p_list if p["score"] >= conf_thresh)
 
+    return counts
+
+
+def _prf(tp: int, fp: int, n_gt: int) -> tuple[float, float, float, float]:
+    """Precision, recall, F1 and F2 from match counts."""
+    p = tp / max(tp + fp, 1e-9)
+    r = tp / max(n_gt, 1e-9)
+    f1 = 2 * p * r / max(p + r, 1e-9)
+    f2 = 5 * p * r / max(4 * p + r, 1e-9)
+    return float(p), float(r), float(f1), float(f2)
+
+
+def _match_at_confidence(
+    gt_by_img: dict[int, dict[int, list[list[float]]]],
+    pred_by_img: dict[int, dict[int, list[dict]]],
+    conf_thresh: float,
+    iou_thresh: float,
+    total_gt: int,
+) -> tuple[int, int, int, int, float, float, float, float]:
+    """
+    Match predictions against ground truth at a specific confidence threshold,
+    pooled over all categories (micro average).
+    Returns (tp, fp, fn, tn, precision, recall, f1, f2).
+    """
+    counts = _match_counts_per_category(gt_by_img, pred_by_img, conf_thresh, iou_thresh)
+    tp = sum(c[0] for c in counts.values())
+    fp = sum(c[1] for c in counts.values())
     fn = max(0, total_gt - tp)
     tn = 0  # In object detection bounding box evaluation, True Negatives are undefined/0
 
-    p = tp / max(tp + fp, 1e-9)
-    r = tp / max(total_gt, 1e-9)
-    f1 = 2 * p * r / max(p + r, 1e-9)
-    f2 = 5 * p * r / max(4 * p + r, 1e-9)
-
-    return tp, fp, fn, tn, float(p), float(r), float(f1), float(f2)
+    return (tp, fp, fn, tn, *_prf(tp, fp, total_gt))
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +237,35 @@ def calculate_conf_curves(
     return result
 
 
+def compute_confidence_stats(
+    predictions: list[dict],
+    threshold: float = 0.0,
+    prefix: str = "",
+) -> dict[str, Any]:
+    """Calculate confidence statistics for predictions above a threshold."""
+
+    confs = np.array(
+        [p["score"] for p in predictions if p["score"] >= threshold],
+        dtype=np.float32,
+    )
+
+    prefix_space = f"{prefix}_" if prefix else ""
+    if len(confs) == 0:
+        return {
+            f"{prefix_space}confidence_mean": None,
+            f"{prefix_space}confidence_std": None,
+            f"{prefix_space}confidence_median": None,
+            f"{prefix_space}n_detections": 0,
+        }
+
+    return {
+        f"{prefix_space}confidence_mean": float(confs.mean()),
+        f"{prefix_space}confidence_std": float(confs.std()),
+        f"{prefix_space}confidence_median": float(np.median(confs)),
+        f"{prefix_space}n_detections": int(len(confs)),
+    }
+
+
 def calculate_metrics(
     pred_list: list[dict],
     coco_gt: Any,
@@ -245,6 +295,10 @@ def calculate_metrics(
     -------
     dict[str, Any]
         Complete dictionary of metrics, AP values, per-class stats, and operating points.
+        ``precision_at_conf``/``recall_at_conf`` pool all objects (micro average);
+        ``precision_mean``/``recall_mean`` average the per-class values over classes
+        with ground truth (macro average). Both use (``conf_threshold``, ``iou_match``)
+        and coincide for single-class datasets.
     """
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
@@ -279,10 +333,29 @@ def calculate_metrics(
         total_gt=total_gt,
     )
 
+    # Per-class P/R at the same operating point (classes without GT -> None)
+    cat_ids = sorted(coco_gt.getCatIds())
+    gt_per_cat: dict[int, int] = defaultdict(int)
+    for cat_dict in gt_by_img.values():
+        for cat_id, boxes in cat_dict.items():
+            gt_per_cat[cat_id] += len(boxes)
+    cat_counts = _match_counts_per_category(gt_by_img, pred_by_img, conf_threshold, iou_match)
+    per_class_p: list[float | None] = []
+    per_class_r: list[float | None] = []
+    for cat_id in cat_ids:
+        if gt_per_cat[cat_id] == 0:
+            per_class_p.append(None)
+            per_class_r.append(None)
+            continue
+        cat_tp, cat_fp = cat_counts.get(cat_id, [0, 0])
+        cat_p, cat_r, _, _ = _prf(cat_tp, cat_fp, gt_per_cat[cat_id])
+        per_class_p.append(cat_p)
+        per_class_r.append(cat_r)
+    valid_p = [v for v in per_class_p if v is not None]
+    valid_r = [v for v in per_class_r if v is not None]
+
     # 4. Standard COCOeval calculation
     aps: dict[str, float] = {}
-    per_class_p: list[float] = []
-    per_class_r: list[float] = []
 
     if pred_list and total_gt > 0:
         coco_dt = coco_gt.loadRes(pred_list)
@@ -295,18 +368,8 @@ def calculate_metrics(
         prec = coco_eval.eval["precision"]  # [T, R, K, A, M]
         for idx, t in enumerate(iou_thrs):
             p_slice = prec[idx, :, :, 0, -1]
-            valid_p = p_slice[p_slice > -1]
-            aps[f"AP@{t:.2f}"] = float(valid_p.mean()) if valid_p.size > 0 else 0.0
-
-        # Class-level P/R at IoU 0.50
-        iou50_idx = int(np.argmin(np.abs(iou_thrs - 0.50)))
-        prec_slice = coco_eval.eval["precision"][iou50_idx, :, :, 0, -1]  # [R, K]
-        for k in range(prec_slice.shape[1]):
-            valid_k = prec_slice[:, k][prec_slice[:, k] > -1]
-            per_class_p.append(float(valid_k.mean()) if valid_k.size > 0 else 0.0)
-
-        rec_slice = coco_eval.eval["recall"][iou50_idx, :, 0, -1]          # [K]
-        per_class_r = [float(r) if r > -1 else 0.0 for r in rec_slice]
+            valid_ap = p_slice[p_slice > -1]
+            aps[f"AP@{t:.2f}"] = float(valid_ap.mean()) if valid_ap.size > 0 else 0.0
     else:
         for t in iou_thrs:
             aps[f"AP@{t:.2f}"] = 0.0
@@ -333,9 +396,10 @@ def calculate_metrics(
         "map50_95":            map50_95,
         "map_20_to_95":        map_20_to_95,
         "all_iou_thresholds":  aps,
-        # Class aggregates (at IoU 0.50)
-        "precision_mean":      float(np.mean(per_class_p)) if per_class_p else 0.0,
-        "recall_mean":         float(np.mean(per_class_r)) if per_class_r else 0.0,
+        # Class-averaged (macro) P/R at the fixed operating point (conf_threshold, iou_match)
+        "precision_mean":      float(np.mean(valid_p)) if valid_p else 0.0,
+        "recall_mean":         float(np.mean(valid_r)) if valid_r else 0.0,
+        "category_ids":        cat_ids,
         "precision_per_class": per_class_p,
         "recall_per_class":    per_class_r,
         # Configurable fixed operating point
@@ -411,26 +475,57 @@ def compute_improvement(baseline_result: dict, adapted_result: dict) -> dict:
 # 3. Domain Gap (MMD) & Multi-Group t-SNE Visualization
 # ---------------------------------------------------------------------------
 
+def _sq_dists(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Pairwise squared Euclidean distances, shape (len(x), len(y))."""
+    x_sq = np.sum(x ** 2, axis=1, keepdims=True)
+    y_sq = np.sum(y ** 2, axis=1, keepdims=True)
+    return np.maximum(x_sq + y_sq.T - 2.0 * (x @ y.T), 0.0)
+
+
+def median_heuristic_gamma(embeddings: np.ndarray) -> float:
+    """RBF ``gamma = 1 / median(pairwise squared distance)`` of ``embeddings``.
+
+    Makes the kernel invariant to the feature scale, so MMD values are
+    comparable across models whose embeddings have different magnitudes.
+    """
+    x = np.asarray(embeddings, dtype=np.float64)
+    d = _sq_dists(x, x)[np.triu_indices(len(x), k=1)]
+    d = d[d > 0]
+    if d.size == 0:
+        raise ValueError("Cannot estimate RBF bandwidth: embeddings have no distinct pairs.")
+    return float(1.0 / np.median(d))
+
+
 def compute_domain_gap_mmd(
     source_embeddings: np.ndarray,
     target_embeddings: np.ndarray,
-    gamma: float = 1.0,
+    gamma: float | None = None,
 ) -> float:
-    """RBF-kernel Maximum Mean Discrepancy (MMD).
+    """Unbiased RBF-kernel squared Maximum Mean Discrepancy (MMD²).
 
     Lower values indicate that source and target feature distributions are
-    closer together (less domain gap).
-    """
-    def _rbf(x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        x_sq = np.sum(x ** 2, axis=1, keepdims=True)
-        y_sq = np.sum(y ** 2, axis=1, keepdims=True)
-        dist = x_sq + y_sq.T - 2.0 * (x @ y.T)
-        return np.exp(-gamma * dist)
+    closer together (less domain gap). The unbiased estimator removes the
+    ~1/n self-similarity bias (so sets of different sizes are comparable) and
+    can be slightly negative when the distributions match.
 
-    k_ss = _rbf(source_embeddings, source_embeddings).mean()
-    k_tt = _rbf(target_embeddings, target_embeddings).mean()
-    k_st = _rbf(source_embeddings, target_embeddings).mean()
-    return float(k_ss + k_tt - 2.0 * k_st)
+    gamma : RBF bandwidth. None -> ``median_heuristic_gamma(source_embeddings)``;
+            pass the same value for every target of one source so all gaps
+            are measured with the same kernel.
+    """
+    xs = np.asarray(source_embeddings, dtype=np.float64)
+    xt = np.asarray(target_embeddings, dtype=np.float64)
+    m, n = len(xs), len(xt)
+    if m < 2 or n < 2:
+        raise ValueError("MMD needs at least 2 samples per set.")
+    if gamma is None:
+        gamma = median_heuristic_gamma(xs)
+
+    k_ss = np.exp(-gamma * _sq_dists(xs, xs))
+    k_tt = np.exp(-gamma * _sq_dists(xt, xt))
+    k_st = np.exp(-gamma * _sq_dists(xs, xt))
+    term_ss = (k_ss.sum() - np.trace(k_ss)) / (m * (m - 1))
+    term_tt = (k_tt.sum() - np.trace(k_tt)) / (n * (n - 1))
+    return float(term_ss + term_tt - 2.0 * k_st.mean())
 
 def get_dataset_plot_label(dataset_label: str, split: str, context: str | None = None) -> str:
     """Build a consistent t-SNE/legend label, e.g. 'SeaDronesSee test (afo_humans_060)'.
@@ -665,10 +760,12 @@ def log_dataset_config(
     source_name: str,
     config_path: str | None = None,
     checkpoint_path: str | None = None,
+    model_name: str | None = None,
 ) -> None:
     """Summarize run and dataset configurations in run.config."""
     _require_wandb()
     config_update: dict = {
+        "model_name":           model_name,
         "source_dataset_name":  source_name,
         "source_dataset_label": dataset_configs[source_name].get("label", source_name),
         "target_dataset_names": [n for n in dataset_configs if n != source_name],
@@ -825,20 +922,31 @@ def log_operating_points_table(
     results_list: list[dict],
     table_name: str = "Table 2: Results of F2 Curves in Source Validation",
 ) -> None:
-    """Log a supplemental table for fixed operating points, curve optimal points, and domain gap."""
+    """Log a supplemental table for fixed operating points, curve optimal points, and domain gap.
+
+    ``val_*`` columns are the optimum of the source validation curves (same for
+    every row of one source); ``*_at_conf`` columns are the target test split
+    evaluated at that source-selected threshold (``conf_threshold``).
+    """
     _require_wandb()
 
     column_spec = {
         "source_name":       ("source_name",       ""),
         "target_name":       ("target_name",       ""),
-        "best_f1_conf":      ("best_f1_conf",      None),
-        "best_f1":           ("best_f1",           None),
-        "best_f2_conf":      ("best_f2_conf",      None),
-        "best_f2":           ("best_f2",           None),
+        "val_best_f1_conf":  ("val_best_f1_conf",  None),
+        "val_best_f1":       ("val_best_f1",       None),
+        "val_best_f2_conf":  ("val_best_f2_conf",  None),
+        "val_best_f2":       ("val_best_f2",       None),
+        "conf_threshold":    ("conf_threshold",    None),
+        "iou_match":         ("iou_match",         None),
+        "tp":                ("tp",                None),
+        "fp":                ("fp",                None),
+        "fn":                ("fn",                None),
         "precision_at_conf": ("precision_at_conf", None),
         "recall_at_conf":    ("recall_at_conf",    None),
         "f1_at_conf":        ("f1_at_conf",        None),
         "f2_at_conf":        ("f2_at_conf",        None),
+        "domain_gap_mmd":    ("domain_gap_mmd",    None),
     }
 
     _build_and_log_table(run, results_list, table_name, column_spec)

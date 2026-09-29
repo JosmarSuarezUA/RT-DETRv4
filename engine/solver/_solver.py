@@ -167,6 +167,10 @@ class BaseSolver(object):
         if path.startswith('http'):
             state = torch.hub.load_state_dict_from_url(path, map_location='cpu')
         else:
+            # The checkpoint may have just been written by rank 0 (save_on_master);
+            # wait for it so other ranks don't read a partially written file.
+            if dist_utils.is_dist_available_and_initialized():
+                torch.distributed.barrier()
             state = torch.load(path, map_location='cpu')
 
         # state['model'] = remove_module_prefix(state['model'])
