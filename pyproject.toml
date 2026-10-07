@@ -32,6 +32,6 @@ dependencies = [
 rt-detrv4 = "rt_detrv4:main"
 
 [tool.uv.sources]
-da-eval = { path = "../da-eval", editable = true }
+da-eval = { git = "https://github.com/JosmarSuarezUA/da-eval", rev = "v0.2.0" }
 
 

@@ -216,3 +216,11 @@ wandb/
 eval_output/
 logs/
 rtdetr_results/
+
+# Domain-adaptation workflow
+.env
+*.local.yaml
+dinov3/
+pretrain/
+output/
+results/

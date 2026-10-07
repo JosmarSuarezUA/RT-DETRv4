@@ -1,0 +1,43 @@
+# Usage (see README, "Domain-adaptation experiments"):
+#   cp .env.example .env            # set DATA_DIR (and WANDB_API_KEY)
+#   docker compose build
+#   docker compose run --rm rtdetr  # shell inside the container, then: uv sync
+services:
+  rtdetr:
+    build:
+      context: .
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: rtdetrv4-dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace                                   # this repository
+      - ${DATA_DIR:?set DATA_DIR in .env}:${DATA_DIR}:ro   # your data, at the same path as on the host
+      - venv:/opt/venv                                 # Python environment (uv sync)
+      - cache:/home/appuser/.cache                     # uv, uv-managed Pythons, da-eval YOLO cache
+    environment:
+      WANDB_API_KEY: ${WANDB_API_KEY:-}
+      FIFTYONE_DATABASE_URI: mongodb://mongo:27017
+    ipc: host                                          # shared memory for DataLoader workers
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Optional dataset browser backend for FiftyOne: docker compose --profile viz up -d mongo
+  mongo:
+    image: mongo:7
+    profiles: [viz]
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  venv:
+  cache:
+  mongo_data:
