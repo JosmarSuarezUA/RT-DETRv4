@@ -531,8 +531,8 @@ wheels = [
 
 [[package]]
 name = "da-eval"
-version = "0.2.0"
-source = { git = "https://github.com/JosmarSuarezUA/da-eval?rev=v0.2.0#d06a06f7c1fa844316c9e7e07244cb7e59adf3aa" }
+version = "0.2.1"
+source = { git = "https://github.com/JosmarSuarezUA/da-eval?rev=v0.2.1#a81f526c0056b66b11d66c432e6875edef77b3f9" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -2063,7 +2063,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "calflops", specifier = ">=0.3.2" },
-    { name = "da-eval", git = "https://github.com/JosmarSuarezUA/da-eval?rev=v0.2.0" },
+    { name = "da-eval", git = "https://github.com/JosmarSuarezUA/da-eval?rev=v0.2.1" },
     { name = "faster-coco-eval", specifier = ">=1.7.2" },
     { name = "ftfy", specifier = ">=6.3.1" },
     { name = "matplotlib", specifier = ">=3.11.2" },
