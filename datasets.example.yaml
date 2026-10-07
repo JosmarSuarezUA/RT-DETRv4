@@ -1,0 +1,32 @@
+# Example datasets file for da-train / da-eval. Copy it outside the repository,
+# replace the paths with your own data and check it with:
+#
+#     uv run da-eval check --datasets /path/to/my_datasets.yaml
+#
+# Each top-level key is a dataset name, used in commands (--source my_coco_dataset).
+# Paths are absolute or relative to this file.
+#
+# Splits: training needs train + val; a source for evaluation needs val + test;
+# a target only needs test. train is optional for evaluation (used for the t-SNE).
+
+# COCO format: an annotation JSON and the image folder its "file_name"s are relative to.
+my_coco_dataset:
+  label: My COCO dataset          # optional display name (plots, W&B, result folders)
+  train:
+    img_folder: /path/to/my_coco_dataset/images/train
+    ann_file: /path/to/my_coco_dataset/annotations/instances_train.json
+  val:
+    img_folder: /path/to/my_coco_dataset/images/val
+    ann_file: /path/to/my_coco_dataset/annotations/instances_val.json
+  test:
+    img_folder: /path/to/my_coco_dataset/images/test
+    ann_file: /path/to/my_coco_dataset/annotations/instances_test.json
+  iou: 0.50                       # optional: IoU for matching (curves + operating point), default 0.50
+  min_score: 0.001                # optional: drop predictions below this score, default 0.001
+
+# YOLOv5 format: point to the dataset's data.yaml (path/train/val/test/names).
+# Labels are read from .../labels/<image>.txt next to .../images/<image>.jpg and
+# converted to COCO once (cached in ~/.cache/da-eval, or $DA_EVAL_CACHE).
+my_yolo_dataset:
+  label: My YOLO dataset
+  yolo: /path/to/my_yolo_dataset/data.yaml

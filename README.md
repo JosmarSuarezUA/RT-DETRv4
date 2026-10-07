@@ -29,6 +29,94 @@
 This is the official implementation of the paper:
 * [RT-DETRv4: Painlessly Furthering Real-Time Object Detection with Vision Foundation Models](https://arxiv.org/abs/2510.25257)
 
+## 🌊 Domain-adaptation experiments (this fork)
+
+This fork adds a reproducible workflow to train RT-DETRv4 on your own datasets and evaluate
+every trained model on the test split of every dataset (cross-domain evaluation), using
+[da-eval](https://github.com/JosmarSuarezUA/da-eval), which is installed automatically.
+The upstream documentation follows below this section.
+
+### 1. Install
+
+Requirements: Linux with an NVIDIA GPU and driver. Choose one option.
+
+**Option A, uv:** install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+
+```bash
+git clone https://github.com/JosmarSuarezUA/RT-DETRv4.git && cd RT-DETRv4
+uv sync
+```
+
+**Option B, Docker:** requires Docker and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+
+```bash
+git clone https://github.com/JosmarSuarezUA/RT-DETRv4.git && cd RT-DETRv4
+cp .env.example .env          # set DATA_DIR to your datasets folder (and UID/GID, WANDB_API_KEY)
+docker compose build
+docker compose run --rm rtdetr   # opens a shell in the container, inside the repository
+uv sync                          # first time only; the environment is kept in a Docker volume
+```
+
+Your datasets folder is mounted read-only at the same path as on the host, so the same
+datasets YAML works inside and outside Docker. All commands below are run from the repository
+root (in the container shell when using Docker).
+
+### 2. Pretrained weights
+
+- **HGNetv2 backbone:** downloaded automatically to `pretrain/hgnetv2/` on first use.
+- **DINOv3 teacher (training only):** clone the repository and download the
+  ViT-B/16 LVD-1689M weights (requires accepting Meta's licence on the
+  [DINOv3 downloads page](https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/)):
+  ```bash
+  git clone https://github.com/facebookresearch/dinov3.git dinov3
+  mkdir -p pretrain && mv /path/to/dinov3_vitb16_pretrain_lvd1689m-*.pth pretrain/dinov3_vitb16_pretrain_lvd1689m.pth
+  ```
+  These are the paths the `configs/rtv4/*.yml` files expect (`teacher_model` section).
+- **COCO checkpoints** (optional, to fine-tune with `-t`): see the table in
+  [Performance](#-performance).
+
+### 3. Describe your datasets
+
+Copy [`datasets.example.yaml`](datasets.example.yaml) **outside the repository** and fill in
+your paths. Each dataset is COCO (annotation JSON + image folder per split) or YOLOv5
+(`yolo: /path/to/data.yaml`); no particular folder layout is required. Then check it:
+
+```bash
+uv run da-eval check --datasets /path/to/my_datasets.yaml
+```
+
+### 4. Train
+
+```bash
+uv run da-train --config configs/rtv4/rtv4_hgnetv2_s_coco.yml \
+    --datasets /path/to/my_datasets.yaml --source my_dataset --gpus 0 \
+    -- --use-amp --seed 0 -t /path/to/rtv4_hgnetv2_s_coco.pth
+```
+
+- The model, schedule and augmentations come from the config; `da-train` only sets the
+  dataset paths and number of classes (any category ids work).
+- Checkpoints go to `output/<config name>_<source>/` (`--output-dir` to change).
+- `--gpus 0,1` trains on two GPUs. Everything after `--` is passed to `train.py`
+  (e.g. `-u key=value` to override config keys). The training length is defined by
+  `epoches`, `flat_epoch`, `no_aug_epoch` and the augmentation `policy`/`stop_epoch`
+  in the config; change them together.
+
+### 5. Evaluate
+
+Evaluate each checkpoint on the test split of every dataset in your YAML:
+
+```bash
+uv run da-eval --model rtdetrv4 --config configs/rtv4/rtv4_hgnetv2_s_coco.yml \
+    --datasets /path/to/my_datasets.yaml \
+    --checkpoint my_dataset=output/rtv4_hgnetv2_s_coco_my_dataset/best_stg1.pth \
+    --checkpoint other_dataset=output/rtv4_hgnetv2_s_coco_other_dataset/best_stg1.pth \
+    --wandb-project my_project       # optional (needs WANDB_API_KEY)
+```
+
+Results (metrics CSV, curves, embeddings, domain-gap MMD, t-SNE) go to `results/rtdetr/`.
+The evaluation protocol is described in the
+[da-eval README](https://github.com/JosmarSuarezUA/da-eval#protocol).
 
 ## 🚀 Overview
 
